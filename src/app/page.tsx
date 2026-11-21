@@ -1,5 +1,7 @@
 "use client";
 
+import { getCurrentUser, signOut } from "aws-amplify/auth";
+import AuthScreen from "./auth-screen";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   LayoutDashboard, Folder, FileText, Star, Share2, Trash2,
@@ -269,6 +271,12 @@ export default function Home() {
   const fileRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
 
+  const [authUser, setAuthUser] = useState<{
+    username: string;
+    userId: string;
+  } | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+
   async function loadFiles() {
     if (!API) {
       setError("API URL missing. Check your .env.local file.");
@@ -292,8 +300,37 @@ export default function Home() {
   }
 
   useEffect(() => {
-    loadFiles();
+    let active = true;
+
+    getCurrentUser()
+      .then((user) => {
+        if (active) {
+          setAuthUser({
+            username: user.username,
+            userId: user.userId,
+          });
+        }
+      })
+      .catch(() => {
+        if (active) setAuthUser(null);
+      })
+      .finally(() => {
+        if (active) setAuthChecking(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (authUser) {
+      loadFiles();
+    } else {
+      setFiles([]);
+      setLoading(false);
+    }
+  }, [authUser]);
 
   // Time-based greeting (client only, avoids hydration mismatch)
   useEffect(() => {
@@ -438,6 +475,16 @@ export default function Home() {
     }
   }
 
+  async function handleLogout() {
+    try {
+      await signOut();
+      setAuthUser(null);
+      setFiles([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Logout failed.");
+    }
+  }
+
   /* ----- Drag & drop upload ----- */
   function hasFiles(e: DragEvent) {
     return Array.from(e.dataTransfer?.types || []).includes("Files");
@@ -494,6 +541,32 @@ export default function Home() {
         : filtered.slice(0, OVERVIEW_LIMIT);
   const hasMore = !search && active === "Overview" && filtered.length > OVERVIEW_LIMIT;
   const cardTitle = active === "My Files" ? "All files" : "Recent files";
+
+  if (authChecking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f7f8fc]">
+        <p className="text-sm text-slate-500">Checking authentication...</p>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <AuthScreen
+        onAuthenticated={async () => {
+          try {
+            const user = await getCurrentUser();
+            setAuthUser({
+              username: user.username,
+              userId: user.userId,
+            });
+          } catch {
+            setAuthUser(null);
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <main
@@ -590,6 +663,12 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <button aria-label="Notifications" className="relative rounded-xl border border-slate-200 p-2.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 active:scale-90">
                 <Bell size={18} />
+              </button>
+              <button
+                onClick={handleLogout}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-red-50 hover:text-red-600"
+              >
+                Logout
               </button>
               <div className="hidden h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-100 to-indigo-100 font-bold text-blue-700 sm:flex">S</div>
             </div>
